@@ -27,6 +27,7 @@
 namespace PrestaShop\PrestaShop\Adapter\Customer\CommandHandler;
 
 use Customer;
+use Db;
 use PrestaShop\PrestaShop\Core\CommandBus\Attributes\AsCommandHandler;
 use PrestaShop\PrestaShop\Core\Crypto\Hashing;
 use PrestaShop\PrestaShop\Core\Domain\Customer\Command\EditCustomerCommand;
@@ -83,6 +84,12 @@ final class EditCustomerHandler extends AbstractCustomerHandler implements EditC
         }
 
         $this->assertCustomerCanAccessDefaultGroup($customer, $command);
+
+        // Before updating customer data, we need to check if the customer is set to disable.
+        // If the above statement is true, the discounts that apply to them must be deactivated.
+        if ($customer->active && !$command->isEnabled()) {
+            $this->disableCartRules($customer);
+        }
 
         $this->updateCustomerWithCommandData($customer, $command);
 
@@ -255,5 +262,15 @@ final class EditCustomerHandler extends AbstractCustomerHandler implements EditC
         if (!in_array($defaultGroupId, $groupIds)) {
             throw new CustomerDefaultGroupAccessException(sprintf('Customer default group with id "%s" must be in access groups', $command->getDefaultGroupId()));
         }
+    }
+
+    /**
+     * Disable cart rules that apply to a customer when they are deactivated.
+     *
+     * @param Customer $customer
+     */
+    private function disableCartRules(Customer $customer)
+    {
+        Db::getInstance()->update('cart_rule', ['active' => 0], '`id_customer` = ' . (int) $customer->id);
     }
 }
