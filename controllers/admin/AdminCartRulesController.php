@@ -620,7 +620,7 @@ class AdminCartRulesControllerCore extends AdminController
                 ($display_shop_name ? ', s.name as shop_name' : '') . '
 			FROM `' . _DB_PREFIX_ . 'customer` c ' .
                 ($display_shop_name ? ' INNER JOIN `' . _DB_PREFIX_ . 'shop` s ON s.id_shop = c.id_shop' : '') . '
-			WHERE c.`deleted` = 0 AND c.is_guest = 0 AND c.active = 1
+			WHERE c.`deleted` = 0 AND c.is_guest = 0
 			AND (
 				c.`id_customer` = ' . (int) $search_query . '
 				OR c.`email` LIKE "%' . pSQL($search_query) . '%"
