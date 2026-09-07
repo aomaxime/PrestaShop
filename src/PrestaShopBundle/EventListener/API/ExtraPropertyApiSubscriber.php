@@ -13,16 +13,15 @@ use ApiPlatform\Metadata\CollectionOperationInterface;
 use ApiPlatform\Metadata\HttpOperation;
 use ApiPlatform\Metadata\Property\Factory\PropertyMetadataFactoryInterface;
 use ApiPlatform\Metadata\Property\Factory\PropertyNameCollectionFactoryInterface;
-use ObjectModelCore;
 use PrestaShop\PrestaShop\Core\Context\LanguageContext;
 use PrestaShop\PrestaShop\Core\Context\ShopContext;
 use PrestaShop\PrestaShop\Core\ExtraProperty\Api\ExtraPropertyApiListRecordCollector;
 use PrestaShop\PrestaShop\Core\ExtraProperty\Definition\ExtraPropertyDefinitionCollection;
 use PrestaShop\PrestaShop\Core\ExtraProperty\Definition\ExtraPropertyDefinitionRepositoryInterface;
+use PrestaShop\PrestaShop\Core\ExtraProperty\Definition\ExtraPropertyDefinitionShopFilterInterface;
 use PrestaShop\PrestaShop\Core\ExtraProperty\Definition\ExtraPropertyScope;
 use PrestaShop\PrestaShop\Core\ExtraProperty\Value\ExtraPropertyReaderInterface;
 use PrestaShop\PrestaShop\Core\ExtraProperty\Value\ExtraPropertyWriterInterface;
-use PrestaShop\PrestaShop\Core\Util\Inflector;
 use PrestaShopBundle\ApiPlatform\Exception\LocaleNotFoundException;
 use PrestaShopBundle\ApiPlatform\LocalizedValueUpdater;
 use PrestaShopBundle\ApiPlatform\Metadata\LocalizedValue;
@@ -58,6 +57,7 @@ class ExtraPropertyApiSubscriber implements EventSubscriberInterface
         protected readonly ShopContext $shopContext,
         protected readonly LanguageContext $languageContext,
         protected readonly LocalizedValueUpdater $localizedValueUpdater,
+        protected readonly ExtraPropertyDefinitionShopFilterInterface $definitionShopFilter,
         protected readonly ?PropertyNameCollectionFactoryInterface $propertyNameCollectionFactory = null,
         protected readonly ?PropertyMetadataFactoryInterface $propertyMetadataFactory = null,
     ) {
@@ -103,8 +103,14 @@ class ExtraPropertyApiSubscriber implements EventSubscriberInterface
         $uriTemplate = (string) $operation->getUriTemplate();
         $method = (string) $operation->getMethod();
 
-        // Single match: the definitions targeting this operation. When none match there is nothing to do.
-        $definitions = $this->repository->getAllDefinitions()->filterByApi($uriTemplate, $method);
+        // Single match: the definitions targeting this operation, restricted to the request's shop
+        // scope (?shopId= / ?shopGroupId= / ?shopIds / ?allShops → ShopContext) — a definition not
+        // available there is neither exposed in the response nor written from the payload.
+        // When none match there is nothing to do.
+        $definitions = $this->definitionShopFilter->filterByShopConstraint(
+            $this->repository->getAllDefinitions()->filterByApi($uriTemplate, $method),
+            $this->shopContext->getShopConstraint()
+        );
         if ($definitions->isEmpty()) {
             return;
         }
@@ -145,7 +151,6 @@ class ExtraPropertyApiSubscriber implements EventSubscriberInterface
                         $entityId,
                         null,
                         $this->shopContext->getShopConstraint(),
-                        $this->isLangMultishop($entityName),
                         $definitions,
                     ),
                     $langScopedFields
@@ -210,7 +215,6 @@ class ExtraPropertyApiSubscriber implements EventSubscriberInterface
                 array_values($entityIdByIndex),
                 $this->languageContext->getId(),
                 $this->shopContext->getShopConstraint(),
-                $this->isLangMultishop($entityName),
                 $readerDefinitions,
             );
         }
@@ -268,16 +272,6 @@ class ExtraPropertyApiSubscriber implements EventSubscriberInterface
     {
         return QueryListProvider::class === $operation->getProvider()
             && null !== ($operation->getExtraProperties()['gridDataFactory'] ?? null);
-    }
-
-    /**
-     * Whether the entity stores LANG values per shop (its ObjectModel definition is multilang_shop). The class name
-     * is the StudlyCase of the (tableized) entity name; isClassLangMultishop safely returns false for any unknown
-     * class, so a wrong guess never breaks the read.
-     */
-    protected function isLangMultishop(string $entityName): bool
-    {
-        return ObjectModelCore::isClassLangMultishop(Inflector::getInflector()->classify($entityName));
     }
 
     protected function isJsonEntityResponse(Response $response): bool
